@@ -1,115 +1,165 @@
-# AKT26 Hackathon · Homework 4: "CUDA: From Zero to Hero"
-**Team 1036 · THE COUNCIL** (Al Akhawayn University in Ifrane, Morocco)
+# CUDA: From Zero to Hero 🚀
+**AKT26 Hackathon · Homework 4 · Team 1036 — THE COUNCIL** (Al Akhawayn University in Ifrane, Morocco)
 
-Fork of [abdelfattah83/akt26_gpu_dev](https://github.com/abdelfattah83/akt26_gpu_dev). The two graded assignments are in **`3-ger/`** and **`4-gemm/`** (directory names, `main` functions and makefiles unchanged). **`5-extras/`** holds optional performance studies that go beyond the assignment: an optimized batched GEMM that beats cuBLAS for every n = 1..32, a GER launch-configuration study, and a multi-GPU strong-scaling study.
+Hi! This is our fork of [abdelfattah83/akt26_gpu_dev](https://github.com/abdelfattah83/akt26_gpu_dev).
+We wrote two GPU kernels from scratch, checked them against NVIDIA's own library (cuBLAS), and then kept going to see how far we could push them.
 
-Results were measured on a **Tesla T4 (Google Colab, CUDA 13.0, compute capability 7.5)**; the multi-GPU study on **2 × Tesla T4 (Kaggle, CUDA 12.8)**.
-
----
-
-## How to build and run
-```bash
-cd 3-ger  && make && ./ger [M] [N] [repeats]      # default 4000 x 2000
-cd 4-gemm && make && ./gemm [n <= 32] [batch]     # default 16 x 16, batch 1000
-```
-The makefiles target `sm=80` (Ampere). On another GPU, override the architecture without editing the makefile, e.g. `make sm=75` on a T4.
-
-To reproduce everything (graded runs, `compute-sanitizer`, both studies and the plots):
-```bash
-bash 5-extras/run_all.sh 75        # writes 5-extras/results_<GPU>/
-```
-
----
-
-## Assignment 1 · `3-ger`: rank-1 update `A ← A + α·x·yᵀ` (column-major)
-**Design.** One thread per matrix element on a 2D grid: `x` → row `i`, `y` → column `j`. The 32 threads of a warp take 32 consecutive **rows of the same column**, which are consecutive addresses in column-major storage, so every access is **coalesced**. Block = **32 × 8 = 256 threads**; grid = ⌈m/32⌉ × ⌈n/8⌉; a bounds check `if (i < m && j < n)` handles sizes that are not multiples of the block.
-
-| m × n | Custom (µs) | Custom GFLOP/s | cuBLAS SGER (µs) | Speed-up vs cuBLAS | Error norm |
-|---|---|---|---|---|---|
-| 4000 × 2000 (default) | 267.8 | 59.7 | 299.3 | **1.12×** | 4.4e-08 |
-| 1000 × 777 | 15.3 | 101.5 | 12.7 | 0.83× | 4.4e-08 |
-| 4001 × 3 | 2.5 | 9.6 | 3.0 | 1.20× | 4.5e-08 |
-| 33 × 65 | 2.5 | 1.7 | 3.4 | 1.32× | 4.4e-08 |
-| 1 × 1 | 2.9 | — | 2.8 | 0.95× | 0 |
-
-All runs print **TEST PASS** (tolerance 1e-6).
-
-**Why it performs like this.** GER is **memory-bound**: each element of A is read and written once (8 bytes) for only 2 flops. At 4000 × 2000 our kernel moves ≈ 64 MB in 268 µs, i.e. **≈ 240 GB/s, about 75% of the T4's 320 GB/s peak**. That is the real ceiling, which is why we match or slightly beat cuBLAS.
-
-## Assignment 2 · `4-gemm`: batched GEMM `C[b] = A[b]·B[b]`, n ≤ 32
-**Design.** **One thread block per matrix, one thread per element of C** (block = n × n ≤ 1024 threads, grid = batch). Each block first copies A[b] and B[b] into **shared memory** (coalesced loads, `threadIdx.x` = row), then `__syncthreads()`, then each thread computes its dot product of length n from shared memory. The only early exit is uniform for a whole block, so no thread can skip the barrier. The host code handles allocation, transfers, CUDA-event timing (warm-up + 100 repeats), the comparison with `cublasSgemmStridedBatched` (C is cleared first so the check is independent), and cleanup.
-
-| n × n, batch | Custom (µs) | Custom GFLOP/s | cuBLAS (µs) | cuBLAS GFLOP/s | Speed-up | Max fwd error |
-|---|---|---|---|---|---|---|
-| 16 × 16, 1000 (default) | 16.4 | 500.2 | 35.3 | 232.0 | **2.16×** | 2.4e-08 |
-| 32 × 32, 1000 | 102.5 | 639.1 | 99.1 | 661.0 | 0.97× | 1.3e-08 |
-| 7 × 7, 5000 | 21.0 | 163.2 | 88.3 | 38.8 | **4.20×** | 3.1e-08 |
-| 31 × 31, 20000 | 2393.9 | 497.8 | 2235.7 | 533.0 | 0.93× | 3.8e-08 |
-| 17 × 17, 1 | 2.5 | 3.9 | 7.3 | 1.3 | 2.88× | 3.2e-09 |
-| 1 × 1, 1000 | 4.1 | 0.5 | 7.0 | 0.3 | 1.70× | 0 |
-
-All runs print **TEST PASS**. Our kernel beats cuBLAS on small matrices, where cuBLAS's generic tiles are mostly empty, and ties with it around n = 32.
-
-## Correctness tools · `compute-sanitizer`
-| Check | Program | Result |
+## TL;DR
+| | What we did | Result |
 |---|---|---|
-| memcheck + leak check | `ger 300 200 2` | **0 errors, 0 bytes leaked** |
-| memcheck + leak check | `gemm 7 50` | **0 errors, 0 bytes leaked** |
-| racecheck (shared memory) | `gemm 16 20` | **0 hazards** |
-| synccheck (barriers) | `gemm 32 10` | **0 errors** |
-| racecheck | `5-extras/gemm_opt` (all n = 1..32) | **0 hazards** |
+| ✅ **Assignment 1** · `3-ger/` | Update a big matrix with a rank-1 product | Correct on every size, **as fast as cuBLAS** (1.12× faster on the default size) |
+| ✅ **Assignment 2** · `4-gemm/` | Multiply thousands of small matrices at once | Correct on every size, **2.2× faster than cuBLAS** at 16 × 16, **4.2×** at 7 × 7 |
+| 🔍 **Safety check** | Ran NVIDIA's `compute-sanitizer` | 0 memory errors, 0 race conditions, 0 leaks |
+| ⭐ **Extra A** | Two optimized versions of the matrix kernel | **Faster than cuBLAS for every size from 1 to 32** (up to 976 GFLOP/s) |
+| ⭐ **Extra B** | Tried 11 different thread-block shapes | Shows why memory access patterns matter (4× difference) |
+| ⭐ **Extra C** | Split the work across **two GPUs** | Computation: **1.98× faster**. With data transfers: only 1.06×, and we explain why |
 
-Full logs: [`5-extras/results_Tesla_T4/sanitizer.txt`](5-extras/results_Tesla_T4/sanitizer.txt) and [`graded_runs.txt`](5-extras/results_Tesla_T4/graded_runs.txt).
+> The graded code lives in **`3-ger/`** and **`4-gemm/`**. We did not rename folders, move `main`, or edit the makefiles.
+> Everything extra is in **`5-extras/`**, so it can't break the graded part.
+
+**Where we ran it:** NVIDIA Tesla T4 on Google Colab (CUDA 13.0), and 2 × Tesla T4 on Kaggle (CUDA 12.8) for the multi-GPU test.
 
 ---
 
-## Extras · going further (`5-extras/`, not part of the graded code)
+## ▶️ Try it yourself
+```bash
+cd 3-ger  && make && ./ger                # default: 4000 x 2000 matrix
+cd 4-gemm && make && ./gemm               # default: 1000 matrices of 16 x 16
+```
+You can also pass your own sizes: `./ger 1000 777` or `./gemm 7 5000`.
 
-### A. Optimized batched GEMM: faster than cuBLAS for every n = 1..32
-[`gemm_opt.cu`](5-extras/gemm_opt.cu) compares three kernels with cuBLAS for every n from 1 to 32 (batch 1000). Every kernel is validated against the CPU reference.
-* **v0 baseline**: the `4-gemm` kernel.
-* **v1 several matrices per block**: for small n a block of n² threads leaves warp lanes idle (n = 7 → 49 threads = 1.5 warps). We pack up to 256 / n² matrices per block (`blockDim.z`, capped at the CUDA limit of 64) so that warps are full.
-* **v2 2 × 2 register tile**: each thread computes 4 elements of C, keeping 2 values of A and 2 of B in registers per step: **1 shared-memory load per FMA instead of 2**, the same idea as cuBLAS's register blocking.
+💡 The makefiles target newer GPUs (`sm=80`). On a T4 (Colab/Kaggle), add `sm=75`: `make sm=75`. No need to edit anything.
 
-| n range | Best kernel | Best GFLOP/s | cuBLAS GFLOP/s | Speed-up over cuBLAS |
+Want to re-run *everything* (tests, sanitizer, studies, plots) in one go?
+```bash
+bash 5-extras/run_all.sh 75
+```
+
+---
+
+## 1️⃣ Assignment 1 — Rank-1 update (`3-ger`)
+**The task:** update every element of a matrix: `A(i,j) = A(i,j) + α · x[i] · y[j]`.
+
+**Our idea, in plain words:**
+* Every element can be updated on its own, so we give **one GPU thread to each element**. That's 8 million threads for the default 4000 × 2000 matrix.
+* The matrix is stored **column by column**. We make neighbouring threads work on neighbouring rows of the same column, so they read memory side by side. The GPU loves that: it's called a *coalesced* access.
+* Threads are grouped in blocks of **32 × 8 = 256**. We launch just enough blocks to cover the whole matrix, and a simple `if (i < m && j < n)` stops the extra threads at the edges.
+
+**How did it go?**
+
+| Matrix size | Our kernel | cuBLAS | Who wins? |
+|---|---|---|---|
+| 4000 × 2000 (default) | 267.8 µs · 59.7 GFLOP/s | 299.3 µs | **us, 1.12×** |
+| 1000 × 777 | 15.3 µs | 12.7 µs | cuBLAS (we're at 0.83×) |
+| 4001 × 3 (awkward shape) | 2.5 µs | 3.0 µs | **us, 1.20×** |
+| 33 × 65 | 2.5 µs | 3.4 µs | **us, 1.32×** |
+| 1 × 1 (tiny) | 2.9 µs | 2.8 µs | tie |
+
+Every run prints **TEST PASS**. The error is about 4 × 10⁻⁸, the same as cuBLAS and far below the 10⁻⁶ limit.
+
+**Why can't anyone go much faster?** For each number we do very little math (2 operations) but we must read it and write it back (8 bytes). So the speed is limited by **memory, not computation**. Our kernel moves about 240 GB/s, roughly **75% of what the T4's memory can do** (≈ 320 GB/s). That ceiling is the same for cuBLAS, which is why we end up neck and neck.
+
+---
+
+## 2️⃣ Assignment 2 — Many small matrix multiplications (`4-gemm`)
+**The task:** compute `C = A × B` for a whole *batch* of small matrices (up to 32 × 32), all at once.
+
+**Our idea, in plain words:**
+* **One block of threads per matrix**, and **one thread per element of the result**. A 16 × 16 matrix gets 256 threads; a 32 × 32 one gets 1024, the maximum allowed.
+* Each element of C needs a whole row of A and a whole column of B. Instead of fetching them again and again from the slow main memory, the block first copies A and B into **shared memory**, a small, very fast scratchpad that all threads of the block can see.
+* Everyone waits at `__syncthreads()` until the copy is complete, then each thread computes its own number.
+* We also wrote all the "plumbing": GPU memory allocation, copies, timing with CUDA events (1 warm-up + 100 timed runs), the cuBLAS comparison (`cublasSgemmStridedBatched`), and cleanup.
+
+**How did it go?**
+
+| Matrix size × how many | Our kernel | cuBLAS | Who wins? |
+|---|---|---|---|
+| 16 × 16 × 1000 (default) | 16.4 µs · **500 GFLOP/s** | 35.3 µs · 232 GFLOP/s | **us, 2.16×** |
+| 7 × 7 × 5000 | 21.0 µs · 163 GFLOP/s | 88.3 µs · 39 GFLOP/s | **us, 4.20×** |
+| 17 × 17 × 1 | 2.5 µs | 7.3 µs | **us, 2.88×** |
+| 1 × 1 × 1000 | 4.1 µs | 7.0 µs | **us, 1.70×** |
+| 32 × 32 × 1000 | 102.5 µs · 639 GFLOP/s | 99.1 µs · 661 GFLOP/s | tie (0.97×) |
+| 31 × 31 × 20000 | 2393.9 µs | 2235.7 µs | cuBLAS (we're at 0.93×) |
+
+Every run prints **TEST PASS** (error ≤ 4 × 10⁻⁸).
+
+**Why do we beat cuBLAS on small matrices?** cuBLAS is built for big matrices: it cuts them into fixed-size tiles. A 7 × 7 matrix leaves most of each tile empty, so a lot of work is wasted. Our kernel is tailored to exactly one small matrix per block, with no waste. Around 32 × 32 cuBLAS catches up, because its tricks start to pay off. We beat that too in Extra A below.
+
+---
+
+## 🔍 Is it really correct? (`compute-sanitizer`)
+Passing the tests is good; proving there are no hidden bugs is better. We used NVIDIA's checking tool, shown in the lecture:
+
+| What it looks for | Program | Result |
+|---|---|---|
+| Reading/writing outside the arrays + memory leaks | `ger`, `gemm` | **0 errors, 0 bytes leaked** |
+| Threads stepping on each other in shared memory (race conditions) | `gemm`, all Extra kernels | **0 hazards** |
+| Wrong use of `__syncthreads()` | `gemm` | **0 errors** |
+
+Full logs: [`sanitizer.txt`](5-extras/results_Tesla_T4/sanitizer.txt) · all graded runs: [`graded_runs.txt`](5-extras/results_Tesla_T4/graded_runs.txt)
+
+---
+
+## ⭐ Extras — going a bit further (`5-extras/`)
+
+### A. Can we beat cuBLAS at *every* size? Yes!
+In [`gemm_opt.cu`](5-extras/gemm_opt.cu) we tried two improvements on our Assignment 2 kernel and tested every matrix size from 1 to 32:
+
+* **v1 — "pack several small matrices per block".** GPU threads work in groups of 32 (a *warp*). A 7 × 7 matrix only needs 49 threads, so part of the second warp sits idle. We put several small matrices in the same block so the warps are full.
+* **v2 — "each thread does 4 results instead of 1".** A thread computes a little 2 × 2 square of C. It loads 2 numbers of A and 2 of B and uses them for 4 multiplications. That's half as many memory reads per operation, the same trick cuBLAS uses for big matrices.
+
+| Matrix size | Best version | Our speed | cuBLAS | How much faster |
 |---|---|---|---|---|
-| 1 – 11 | v1 several matrices / block | 0.8 → 421 | 0.3 → 112 | **2.5× – 5.4×** |
-| 12 – 32 | v2 2 × 2 register tile | 470 → **976** | 138 → 717 | **1.2× – 5.2×** |
-| n = 32 | v2 | **975.6** | 717.1 | **1.36×** |
+| 1 to 11 | v1 (packed) | up to 421 GFLOP/s | up to 112 GFLOP/s | **2.5× – 5.4×** |
+| 12 to 32 | v2 (4 results / thread) | up to **976 GFLOP/s** | up to 717 GFLOP/s | **1.2× – 5.2×** |
+| exactly 32 | v2 | **975.6 GFLOP/s** | 717.1 GFLOP/s | **1.36×** |
+
+Every version is checked against the CPU result for every size.
 
 ![GEMM GFLOP/s](5-extras/results_Tesla_T4/gemm_gflops.png)
 ![Speed-up over cuBLAS](5-extras/results_Tesla_T4/gemm_speedup.png)
 
-### B. GER: thread-block shape vs memory bandwidth
-[`ger_sweep.cu`](5-extras/ger_sweep.cu) runs our GER kernel with 11 block shapes on 4 matrix sizes.
-* **Coalescing matters most.** With block (1, 256), consecutive threads walk *down a row* (addresses m·4 bytes apart): **≈ 57 GB/s, 4× slower** than any shape with `block.x ≥ 32` (≈ 240 GB/s).
-* **Enough warps matter too.** (32, 1) blocks have a single warp each and reach only ≈ 180 GB/s; 4 or more warps per block (128–256 threads) hide memory latency.
-* At 8192 × 8192 our best shape (256, 1) reaches **248 GB/s vs 231 GB/s for cuBLAS SGER**.
+### B. Does the shape of a thread block matter? A lot.
+In [`ger_sweep.cu`](5-extras/ger_sweep.cu) we ran our Assignment 1 kernel with 11 different block shapes.
+
+* **Reading memory "side by side" is everything.** With blocks of 32+ threads along the rows, we get ≈ 240 GB/s. With the shape (1, 256), neighbouring threads jump far apart in memory, and speed drops to ≈ 57 GB/s, **4× slower**, even though the code is identical!
+* **One warp per block is not enough.** (32, 1) blocks reach only ≈ 180 GB/s. With 4 or more warps per block, the GPU always has some work ready while others wait for memory.
+* On a huge 8192 × 8192 matrix, our best shape hits **248 GB/s, vs 231 GB/s for cuBLAS**.
 
 ![GER block shapes](5-extras/results_Tesla_T4/ger_blocks.png)
 
-Raw data: [`gemm_sweep.csv`](5-extras/results_Tesla_T4/gemm_sweep.csv), [`ger_sweep.csv`](5-extras/results_Tesla_T4/ger_sweep.csv).
+### C. What if we use two GPUs?
+Kaggle offers a machine with **two T4 GPUs**, so we split the batch in half: GPU 0 takes the first 25,000 matrices, GPU 1 the other 25,000 ([`multi_gpu_gemm.cu`](5-extras/multi_gpu_gemm.cu)). We measured it two ways:
 
-### C. Multi-GPU batched GEMM: 2 × Tesla T4 (Kaggle)
-[`multi_gpu_gemm.cu`](5-extras/multi_gpu_gemm.cu) splits the batch into contiguous chunks, one per GPU (the products are independent, so no communication is needed). Each GPU runs the fastest kernel from study A (v1 for n ≤ 11, v2 otherwise) in its own CUDA stream. This is a **strong-scaling** study (fixed batch of 50,000 matrices) measured in two ways:
-* **(A) kernels only**: A and B are already on the GPUs; we time the computation alone.
-* **(B) end-to-end**: copy A and B in (pinned host memory, asynchronous copies on both GPUs at once), compute, copy C out.
+* **(A) Computation only**: the data is already on the GPUs.
+* **(B) The whole job**: send the data to the GPUs, compute, bring the results back.
 
-| n (batch 50,000) | (A) 1 GPU | (A) 2 GPUs | (A) speed-up | (B) 1 GPU | (B) 2 GPUs | (B) speed-up | kernel share of (B) |
-|---|---|---|---|---|---|---|---|
-| 8 | 275 µs · 186 GF/s | 140 µs · 365 GF/s | **1.96×** (eff. 0.98) | 3.36 ms | 3.20 ms | 1.05× | 8% |
-| 16 | 769 µs · 533 GF/s | 555 µs · 738 GF/s | 1.39× (eff. 0.69) | 13.3 ms | 12.5 ms | 1.07× | 6% |
-| 32 | 3541 µs · 925 GF/s | 1790 µs · **1831 GF/s** | **1.98×** (eff. 0.99) | 53.2 ms | 50.0 ms | 1.06× | 7% |
+| Matrix size (50,000 of them) | (A) 1 GPU → 2 GPUs | (A) speed-up | (B) 1 GPU → 2 GPUs | (B) speed-up |
+|---|---|---|---|---|
+| 8 × 8 | 275 → 140 µs | **1.96×** | 3.36 → 3.20 ms | 1.05× |
+| 16 × 16 | 769 → 555 µs | 1.39× | 13.3 → 12.5 ms | 1.07× |
+| 32 × 32 | 3541 → 1790 µs (**1.83 TFLOP/s**) | **1.98×** | 53.2 → 50.0 ms | 1.06× |
 
-All configurations pass the CPU check (errors 1.4–3.4e-08).
+All results checked against the CPU ✅
 
-**What it shows.**
-* **The computation scales almost perfectly** (1.96–1.98× on 2 GPUs for n = 8 and 32; 1.83 TFLOP/s with two T4s at n = 32). The n = 16 case (1.39×) is the exception; we have not investigated its cause (for example clock differences between the two GPUs).
-* **End to end, a second GPU brings almost nothing (≈ 1.06×).** The kernel is only 6–8% of the single-GPU end-to-end time; the rest is PCIe traffic (A and B in, C out). By **Amdahl's law**, with a parallel fraction p ≈ 0.07 the best possible speed-up on 2 GPUs is 1 / (0.93 + 0.07/2) ≈ **1.04×**, which matches the measurement.
-* **The copies do not speed up with more GPUs:** the aggregate host↔GPU bandwidth stays at **≈ 12 GB/s with 1 or 2 GPUs**. `nvidia-smi topo -m` ([`topology.txt`](5-extras/results_Tesla_T4_x2/topology.txt)) reports **PHB**: the two GPUs are connected only through the CPU's PCIe host bridge (no NVLink), on a 4-vCPU virtual machine, so the host side is the shared bottleneck.
-* **Lesson:** multi-GPU only pays off when data stays resident on the GPUs across many operations (or when copies are pipelined with computation); a single batched GEMM is too cheap to amortize its PCIe transfers.
-* Single-GPU numbers on this second T4 (925 GFLOP/s at n = 32) are consistent with the Colab T4 (976 GFLOP/s).
+**So… why is the whole job barely faster?**
+* The computation itself splits **almost perfectly** (1.96–1.98×).
+* But the multiplication only takes **6–8% of the total time**. The other ~93% is moving data between the computer's memory and the GPUs.
+* This is **Amdahl's law** from Session 3: if only 7% of the work gets faster, two GPUs can at best give 1 / (0.93 + 0.07/2) ≈ **1.04×**. That's exactly what we measured.
+* And the data transfers don't get faster with a second GPU: the total speed stays at **≈ 12 GB/s** either way. `nvidia-smi topo -m` ([`topology.txt`](5-extras/results_Tesla_T4_x2/topology.txt)) shows both GPUs reach the CPU through the same PCIe host bridge (`PHB`, no NVLink), so they share that road.
+* The 16 × 16 case (1.39×) is the odd one out; we haven't found the cause yet (it might be clock differences between the two GPUs).
 
 ![Multi-GPU scaling](5-extras/results_Tesla_T4_x2/multi_gpu.png)
 
-Raw data: [`multi_gpu.csv`](5-extras/results_Tesla_T4_x2/multi_gpu.csv), log [`multi_gpu.txt`](5-extras/results_Tesla_T4_x2/multi_gpu.txt). Reproduce with `bash 5-extras/run_multi_gpu.sh 75` on a machine with several GPUs.
+---
+
+## 💡 What we learned
+1. **Think about memory first.** Both kernels are mostly limited by how fast data moves, not by how fast the GPU calculates. Reading memory "side by side" alone made a 4× difference.
+2. **Fit the work to the hardware.** Full warps and enough threads per block keep the GPU busy; for tiny matrices, packing several per block made us up to 5× faster than cuBLAS.
+3. **Re-use what you load.** Shared memory and computing several results per thread cut memory traffic, the same idea as in professional libraries.
+4. **More GPUs ≠ automatically faster.** If moving the data costs more than computing, a second GPU barely helps. The data should stay on the GPU across many operations.
+5. **Always check correctness.** Every number above comes with a CPU comparison, and the sanitizer found zero problems.
+
+---
+
+<sub>All raw numbers are in the repo: [`gemm_sweep.csv`](5-extras/results_Tesla_T4/gemm_sweep.csv) · [`ger_sweep.csv`](5-extras/results_Tesla_T4/ger_sweep.csv) · [`multi_gpu.csv`](5-extras/results_Tesla_T4_x2/multi_gpu.csv). Re-run the multi-GPU study with `bash 5-extras/run_multi_gpu.sh 75` on a machine with several GPUs.</sub>
