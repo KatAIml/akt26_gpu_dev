@@ -1,9 +1,9 @@
 # AKT26 Hackathon · Homework 4: "CUDA: From Zero to Hero"
 **Team 1036 · THE COUNCIL** (Al Akhawayn University in Ifrane, Morocco)
 
-Fork of [abdelfattah83/akt26_gpu_dev](https://github.com/abdelfattah83/akt26_gpu_dev). The two graded assignments are in **`3-ger/`** and **`4-gemm/`** (directory names, `main` functions and makefiles unchanged). **`5-extras/`** holds optional performance studies that go beyond the assignment.
+Fork of [abdelfattah83/akt26_gpu_dev](https://github.com/abdelfattah83/akt26_gpu_dev). The two graded assignments are in **`3-ger/`** and **`4-gemm/`** (directory names, `main` functions and makefiles unchanged). **`5-extras/`** holds optional performance studies that go beyond the assignment: an optimized batched GEMM that beats cuBLAS for every n = 1..32, a GER launch-configuration study, and a multi-GPU strong-scaling study.
 
-All results below were measured on a **Tesla T4 (Google Colab, CUDA 13.0, compute capability 7.5)**.
+Results were measured on a **Tesla T4 (Google Colab, CUDA 13.0, compute capability 7.5)**; the multi-GPU study on **2 × Tesla T4 (Kaggle, CUDA 12.8)**.
 
 ---
 
@@ -89,3 +89,27 @@ Full logs: [`5-extras/results_Tesla_T4/sanitizer.txt`](5-extras/results_Tesla_T4
 ![GER block shapes](5-extras/results_Tesla_T4/ger_blocks.png)
 
 Raw data: [`gemm_sweep.csv`](5-extras/results_Tesla_T4/gemm_sweep.csv), [`ger_sweep.csv`](5-extras/results_Tesla_T4/ger_sweep.csv).
+
+### C. Multi-GPU batched GEMM: 2 × Tesla T4 (Kaggle)
+[`multi_gpu_gemm.cu`](5-extras/multi_gpu_gemm.cu) splits the batch into contiguous chunks, one per GPU (the products are independent, so no communication is needed). Each GPU runs the fastest kernel from study A (v1 for n ≤ 11, v2 otherwise) in its own CUDA stream. This is a **strong-scaling** study (fixed batch of 50,000 matrices) measured in two ways:
+* **(A) kernels only**: A and B are already on the GPUs; we time the computation alone.
+* **(B) end-to-end**: copy A and B in (pinned host memory, asynchronous copies on both GPUs at once), compute, copy C out.
+
+| n (batch 50,000) | (A) 1 GPU | (A) 2 GPUs | (A) speed-up | (B) 1 GPU | (B) 2 GPUs | (B) speed-up | kernel share of (B) |
+|---|---|---|---|---|---|---|---|
+| 8 | 275 µs · 186 GF/s | 140 µs · 365 GF/s | **1.96×** (eff. 0.98) | 3.36 ms | 3.20 ms | 1.05× | 8% |
+| 16 | 769 µs · 533 GF/s | 555 µs · 738 GF/s | 1.39× (eff. 0.69) | 13.3 ms | 12.5 ms | 1.07× | 6% |
+| 32 | 3541 µs · 925 GF/s | 1790 µs · **1831 GF/s** | **1.98×** (eff. 0.99) | 53.2 ms | 50.0 ms | 1.06× | 7% |
+
+All configurations pass the CPU check (errors 1.4–3.4e-08).
+
+**What it shows.**
+* **The computation scales almost perfectly** (1.96–1.98× on 2 GPUs for n = 8 and 32; 1.83 TFLOP/s with two T4s at n = 32). The n = 16 case (1.39×) is the exception; we have not investigated its cause (for example clock differences between the two GPUs).
+* **End to end, a second GPU brings almost nothing (≈ 1.06×).** The kernel is only 6–8% of the single-GPU end-to-end time; the rest is PCIe traffic (A and B in, C out). By **Amdahl's law**, with a parallel fraction p ≈ 0.07 the best possible speed-up on 2 GPUs is 1 / (0.93 + 0.07/2) ≈ **1.04×**, which matches the measurement.
+* **The copies do not speed up with more GPUs:** the aggregate host↔GPU bandwidth stays at **≈ 12 GB/s with 1 or 2 GPUs**. `nvidia-smi topo -m` ([`topology.txt`](5-extras/results_Tesla_T4_x2/topology.txt)) reports **PHB**: the two GPUs are connected only through the CPU's PCIe host bridge (no NVLink), on a 4-vCPU virtual machine, so the host side is the shared bottleneck.
+* **Lesson:** multi-GPU only pays off when data stays resident on the GPUs across many operations (or when copies are pipelined with computation); a single batched GEMM is too cheap to amortize its PCIe transfers.
+* Single-GPU numbers on this second T4 (925 GFLOP/s at n = 32) are consistent with the Colab T4 (976 GFLOP/s).
+
+![Multi-GPU scaling](5-extras/results_Tesla_T4_x2/multi_gpu.png)
+
+Raw data: [`multi_gpu.csv`](5-extras/results_Tesla_T4_x2/multi_gpu.csv), log [`multi_gpu.txt`](5-extras/results_Tesla_T4_x2/multi_gpu.txt). Reproduce with `bash 5-extras/run_multi_gpu.sh 75` on a machine with several GPUs.

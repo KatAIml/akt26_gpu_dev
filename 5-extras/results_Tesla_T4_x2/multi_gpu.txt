@@ -1,0 +1,23 @@
+GPUs found: 2
+  GPU 0: Tesla T4 (compute capability 7.5, 14.6 GiB)
+  GPU 1: Tesla T4 (compute capability 7.5, 14.6 GiB)
+
+n = 8, batch = 50000 (12.8 MB per operand, 0.05 GFLOP per batch)
+ GPUs | (A) kernels only us (GF/s)  speedup   eff. | (B) end-to-end us (GF/s)  speedup   eff. | error
+    1 |        275.3 (    186.0)     1.00   1.00 |       3355.0 (     15.3)     1.00   1.00 | 3.41e-08
+    2 |        140.2 (    365.1)     1.96   0.98 |       3199.9 (     16.0)     1.05   0.52 | 3.41e-08
+      end-to-end moves 38 MB over PCIe per batch: 12.0 GB/s aggregate with 2 GPU(s); the kernel is 8% of the 1-GPU end-to-end time
+
+n = 16, batch = 50000 (51.2 MB per operand, 0.41 GFLOP per batch)
+ GPUs | (A) kernels only us (GF/s)  speedup   eff. | (B) end-to-end us (GF/s)  speedup   eff. | error
+    1 |        769.2 (    532.5)     1.00   1.00 |      13321.6 (     30.7)     1.00   1.00 | 2.59e-08
+    2 |        555.0 (    738.0)     1.39   0.69 |      12471.1 (     32.8)     1.07   0.53 | 2.59e-08
+      end-to-end moves 154 MB over PCIe per batch: 12.3 GB/s aggregate with 2 GPU(s); the kernel is 6% of the 1-GPU end-to-end time
+
+n = 32, batch = 50000 (204.8 MB per operand, 3.28 GFLOP per batch)
+ GPUs | (A) kernels only us (GF/s)  speedup   eff. | (B) end-to-end us (GF/s)  speedup   eff. | error
+    1 |       3541.2 (    925.3)     1.00   1.00 |      53231.9 (     61.6)     1.00   1.00 | 1.44e-08
+    2 |       1790.1 (   1830.6)     1.98   0.99 |      50037.3 (     65.5)     1.06   0.53 | 1.44e-08
+      end-to-end moves 614 MB over PCIe per batch: 12.3 GB/s aggregate with 2 GPU(s); the kernel is 7% of the 1-GPU end-to-end time
+
+ALL TESTS PASS (every configuration checked against the CPU reference, tol = 1e-06) | CSV: /kaggle/working/akt26_gpu_dev/5-extras/results_Tesla_T4_x2/multi_gpu.csv
