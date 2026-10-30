@@ -209,7 +209,8 @@ int main(int argc, char** argv)
         CHECK(cudaMemcpy(dB, hB.data(), bytes, cudaMemcpyHostToDevice));
 
         // launch configurations
-        const int mpb = std::max(1, 256 / (n * n));                       // v1: matrices per block (~256 threads)
+        // v1: matrices per block (~256 threads), capped at 64 because blockDim.z <= 64 in CUDA
+        const int mpb = std::min(64, std::max(1, 256 / (n * n)));
         const dim3 blk0(n, n, 1),   grd0(batch, 1, 1);
         const dim3 blk1(n, n, mpb), grd1((batch + mpb - 1) / mpb, 1, 1);
         const size_t shm1 = (size_t)mpb * 2 * n * n * sizeof(float);
