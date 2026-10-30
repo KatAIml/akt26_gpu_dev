@@ -1,0 +1,9 @@
+# compiled binaries
+0-hello-world/hello-world
+1-axpy/axpy
+2-dot/dot
+3-ger/ger
+4-gemm/gemm
+5-extras/gemm_opt
+5-extras/ger_sweep
+*.o
