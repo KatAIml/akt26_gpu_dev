@@ -15,12 +15,46 @@
 //
 // Matrices are N x N, column-major.
 ////////////////////////////////////////////////////////////////////////////////
+#define NMAX 32   // largest supported matrix size (n <= 32)
+
+// One thread-block per matrix of the batch, one thread per element C(row, col):
+//   blockIdx.x  -> matrix index b
+//   threadIdx.x -> row, threadIdx.y -> col   (block = n x n threads, at most 32 x 32 = 1024)
+// A[b] and B[b] are first staged in shared memory, so each element is read from
+// global memory only once per block instead of n times.
 __global__ void batch_gemm_kernel(int n, int batch_size,
                                     const float* A,
                                     const float* B,
                                     float* C)
 {
-    // TODO: write your own kernel here
+    __shared__ float sA[NMAX][NMAX];   // sA[col][row] = A(row, col)  (column-major, like global memory)
+    __shared__ float sB[NMAX][NMAX];   // sB[col][row] = B(row, col)
+
+    const int b   = blockIdx.x;
+    const int row = threadIdx.x;
+    const int col = threadIdx.y;
+
+    // the block is exactly n x n threads, so only the matrix index needs a guard;
+    // it is the same for every thread of the block, so no thread skips __syncthreads()
+    if (b >= batch_size) return;
+
+    const size_t base = (size_t)b * n * n;     // start of matrix b in the batch
+
+    // each thread loads one element of A[b] and one of B[b]
+    // (consecutive threadIdx.x -> consecutive addresses: coalesced)
+    sA[col][row] = A[base + (size_t)col * n + row];
+    sB[col][row] = B[base + (size_t)col * n + row];
+
+    // wait until the whole block has filled shared memory
+    __syncthreads();
+
+    // C(row, col) = sum_k A(row, k) * B(k, col)
+    float sum = 0.0f;
+    for (int k = 0; k < n; ++k) {
+        sum += sA[k][row] * sB[col][k];
+    }
+
+    C[base + (size_t)col * n + row] = sum;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -147,12 +181,17 @@ int main(int argc, char** argv)
     // --------------------------------------------------------
     // Allocate GPU memory
     // --------------------------------------------------------
-    // TODO: write your allocations here
+    float *d_A = nullptr, *d_B = nullptr, *d_C = nullptr;
+
+    cudaMalloc(&d_A, bytes);
+    cudaMalloc(&d_B, bytes);
+    cudaMalloc(&d_C, bytes);
 
     // --------------------------------------------------------
     // Copy A and B to GPU
     // --------------------------------------------------------
-    // TODO: write your mem-copies here
+    cudaMemcpy(d_A, h_A.data(), bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_B, h_B.data(), bytes, cudaMemcpyHostToDevice);
 
     // --------------------------------------------------------
     // GPU information
@@ -175,62 +214,95 @@ int main(int argc, char** argv)
     // --------------------------------------------------------
     // CUDA events
     // --------------------------------------------------------
-    // TODO: create CUDA events for timing
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
 
     // --------------------------------------------------------
     // Custom kernel configuration
     // --------------------------------------------------------
-    // TODO: configure your kernel here
-
+    // one block of n x n threads per matrix, one block per matrix of the batch
+    dim3 block(n, n, 1);
+    dim3 grid(batch_size, 1, 1);
 
     // --------------------------------------------------------
     // Warmup run
     // --------------------------------------------------------
-    // TODO: run your kernel once (warmup - not timed)
+    batch_gemm_kernel<<<grid, block>>>(n, batch_size, d_A, d_B, d_C);
 
     cudaDeviceSynchronize();
 
-    // TODO: start your timing here using CUDA events
-
-    for (int r = 0; r < repeats; ++r) {
-        // TODO: run your kernel here
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(err));
+        return EXIT_FAILURE;
     }
 
-    // TODO: end your timing here using CUDA events
+    cudaEventRecord(start);
+
+    for (int r = 0; r < repeats; ++r) {
+        batch_gemm_kernel<<<grid, block>>>(n, batch_size, d_A, d_B, d_C);
+    }
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
 
     float custom_ms = 0.0f;
-    // TODO: calculate the time of your kernel using 'cudaEventElapsedTime'
+    cudaEventElapsedTime(&custom_ms, start, stop);
 
     const double custom_us = custom_ms * 1000.0 / repeats;
 
 
-    // TODO: copy the output matrices to CPU in 'h_custom'
+    cudaMemcpy(h_custom.data(), d_C, bytes, cudaMemcpyDeviceToHost);
 
     // --------------------------------------------------------
     // cuBLAS strided batched GEMM
     // --------------------------------------------------------
 
-    // TODO: create a cuBLAS handle
+    cublasHandle_t handle;
+    cublasCreate(&handle);
 
-    // TODO: warmup run for 'cublasSgemmStridedBatched'
-    // TODO: note that the leading dimension for all matrices is 'n'
+    const float alpha = 1.0f;     // C = alpha * A * B + beta * C
+    const float beta  = 0.0f;
+    const long long stride = (long long)n * n;   // distance between consecutive matrices
+
+    // clear C so that the cuBLAS result cannot be confused with the custom one
+    cudaMemset(d_C, 0, bytes);
+
+    // warmup run; the leading dimension of every matrix is n
+    cublasSgemmStridedBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                              n, n, n,
+                              &alpha,
+                              d_A, n, stride,
+                              d_B, n, stride,
+                              &beta,
+                              d_C, n, stride,
+                              batch_size);
 
     cudaDeviceSynchronize();
 
-    // TODO: start timing using CUDA events
+    cudaEventRecord(start);
     for (int r = 0; r < repeats; ++r) {
 
-        // TODO: call 'cublasSgemmStridedBatched'
+        cublasSgemmStridedBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                                  n, n, n,
+                                  &alpha,
+                                  d_A, n, stride,
+                                  d_B, n, stride,
+                                  &beta,
+                                  d_C, n, stride,
+                                  batch_size);
     }
 
-    // TODO: end timing using CUDA events
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
 
     float cublas_ms = 0.0f;
-    // TODO: calculate the time of 'cublasSgemmStridedBatched' using 'cudaEventElapsedTime'
+    cudaEventElapsedTime(&cublas_ms, start, stop);
 
     const double cublas_us = cublas_ms * 1000.0 / repeats;
 
-    // TODO: copy the output matrices to CPU in 'h_cublas'
+    cudaMemcpy(h_cublas.data(), d_C, bytes, cudaMemcpyDeviceToHost);
 
     // --------------------------------------------------------
     // Performance and forward error
@@ -281,11 +353,14 @@ int main(int argc, char** argv)
     // --------------------------------------------------------
     // Cleanup
     // --------------------------------------------------------
-    // TODO: Destroy any CUDA events you created
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
-    // TODO: Destroy any cuBLAS handles you created
+    cublasDestroy(handle);
 
-    // TODO: free any GPU memory you allocated
+    cudaFree(d_A);
+    cudaFree(d_B);
+    cudaFree(d_C);
 
     return 0;
 }
