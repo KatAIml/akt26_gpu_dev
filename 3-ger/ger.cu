@@ -14,7 +14,17 @@
 // Column-major storage: A(i,j) = A[j*m + i]
 __global__ void ger_kernel(int m, int n, float alpha, const float* x, const float* y, float* A)
 {
-    // TODO: write your CUDA kernel here
+    // One thread per matrix element, 2D grid:
+    //   x-dimension -> row index i, y-dimension -> column index j.
+    // Consecutive threads of a warp take consecutive rows of the same column,
+    // i.e. consecutive addresses in column-major storage (coalesced access).
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+    // threads outside the matrix (when m or n is not a multiple of the block size) do nothing
+    if (i < m && j < n) {
+        A[(size_t)j * m + i] += alpha * x[i] * y[j];
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -107,8 +117,12 @@ int main(int argc, char** argv)
 
     // n1000: configure your kernel here
     // TODO: the configuration below is a default that you must change
-    dim3 block(16, 16, 1);
-    dim3 grid( 1, 1, 1);
+    // 32 threads along the rows (one full warp per column segment -> coalesced),
+    // 8 columns per block: 256 threads per block.
+    // Enough blocks to cover the whole m x n matrix (rounded up).
+    dim3 block(32, 8, 1);
+    dim3 grid( (m + block.x - 1) / block.x,
+               (n + block.y - 1) / block.y, 1);
     // end of TODO: kernel configuration
 
     cudaEvent_t start, stop;
