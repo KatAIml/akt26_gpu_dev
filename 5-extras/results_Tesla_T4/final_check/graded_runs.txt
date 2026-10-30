@@ -1,0 +1,127 @@
+Matrix: 4000 x 2000, alpha = 1.50, repeats = 100
+Matrix storage: column-major
+
+Implementation          Time (us)      GFLOP/s           Error Norm
+--------------------------------------------------------------------
+Custom kernel             274.390       58.311         4.440474e-08
+cuBLAS SGER               305.081       52.445         4.440474e-08
+
+TEST PASS
+Speedup (cuBLAS time / custom time): 1.112x
+
+Matrix: 1000 x 777, alpha = 1.50, repeats = 100
+Matrix storage: column-major
+
+Implementation          Time (us)      GFLOP/s           Error Norm
+--------------------------------------------------------------------
+Custom kernel              16.986       91.486         4.442626e-08
+cuBLAS SGER                12.664      122.710         4.442626e-08
+
+TEST PASS
+Speedup (cuBLAS time / custom time): 0.746x
+
+Matrix: 4001 x 3, alpha = 1.50, repeats = 100
+Matrix storage: column-major
+
+Implementation          Time (us)      GFLOP/s           Error Norm
+--------------------------------------------------------------------
+Custom kernel               2.725        8.809         4.526064e-08
+cuBLAS SGER                 3.036        7.908         4.526064e-08
+
+TEST PASS
+Speedup (cuBLAS time / custom time): 1.114x
+
+Matrix: 1 x 1, alpha = 1.50, repeats = 100
+Matrix storage: column-major
+
+Implementation          Time (us)      GFLOP/s           Error Norm
+--------------------------------------------------------------------
+Custom kernel               3.143        0.001         0.000000e+00
+cuBLAS SGER                 3.156        0.001         0.000000e+00
+
+TEST PASS
+Speedup (cuBLAS time / custom time): 1.004x
+
+Matrix: 33 x 65, alpha = 1.50, repeats = 100
+Matrix storage: column-major
+
+Implementation          Time (us)      GFLOP/s           Error Norm
+--------------------------------------------------------------------
+Custom kernel               2.905        1.477         4.385450e-08
+cuBLAS SGER                 3.420        1.254         4.385450e-08
+
+TEST PASS
+Speedup (cuBLAS time / custom time): 1.177x
+
+GPU: Tesla T4 (compute capability 7.5)
+Matrix size: 16 x 16, batch size: 1000
+FP32, column-major matrices, repeats: 100
+
+Implementation              Time (us)      GFLOP/s  Max batch fwd error
+-----------------------------------------------------------------------
+Custom kernel                  15.084      543.109         2.438560e-08
+cuBLAS Strided Batched         32.144      254.853         3.199161e-08
+
+TEST PASS
+Speedup (cuBLAS time / custom time): 2.131x
+
+GPU: Tesla T4 (compute capability 7.5)
+Matrix size: 32 x 32, batch size: 1000
+FP32, column-major matrices, repeats: 100
+
+Implementation              Time (us)      GFLOP/s  Max batch fwd error
+-----------------------------------------------------------------------
+Custom kernel                 110.810      591.429         1.337861e-08
+cuBLAS Strided Batched         89.957      728.525         1.337861e-08
+
+TEST PASS
+Speedup (cuBLAS time / custom time): 0.812x
+
+GPU: Tesla T4 (compute capability 7.5)
+Matrix size: 1 x 1, batch size: 1000
+FP32, column-major matrices, repeats: 100
+
+Implementation              Time (us)      GFLOP/s  Max batch fwd error
+-----------------------------------------------------------------------
+Custom kernel                   3.714        0.538         0.000000e+00
+cuBLAS Strided Batched          7.104        0.282         0.000000e+00
+
+TEST PASS
+Speedup (cuBLAS time / custom time): 1.913x
+
+GPU: Tesla T4 (compute capability 7.5)
+Matrix size: 7 x 7, batch size: 5000
+FP32, column-major matrices, repeats: 100
+
+Implementation              Time (us)      GFLOP/s  Max batch fwd error
+-----------------------------------------------------------------------
+Custom kernel                  14.316      239.600         3.141520e-08
+cuBLAS Strided Batched         78.716       43.574         3.086624e-08
+
+TEST PASS
+Speedup (cuBLAS time / custom time): 5.499x
+
+GPU: Tesla T4 (compute capability 7.5)
+Matrix size: 31 x 31, batch size: 20000
+FP32, column-major matrices, repeats: 100
+
+Implementation              Time (us)      GFLOP/s  Max batch fwd error
+-----------------------------------------------------------------------
+Custom kernel                2950.267      403.909         3.839831e-08
+cuBLAS Strided Batched       2478.940      480.705         3.839831e-08
+
+TEST PASS
+Speedup (cuBLAS time / custom time): 0.840x
+
+GPU: Tesla T4 (compute capability 7.5)
+Matrix size: 17 x 17, batch size: 1
+FP32, column-major matrices, repeats: 100
+
+Implementation              Time (us)      GFLOP/s  Max batch fwd error
+-----------------------------------------------------------------------
+Custom kernel                   3.389        2.899         3.161330e-09
+cuBLAS Strided Batched          7.575        1.297         3.161330e-09
+
+TEST PASS
+Speedup (cuBLAS time / custom time): 2.235x
+
