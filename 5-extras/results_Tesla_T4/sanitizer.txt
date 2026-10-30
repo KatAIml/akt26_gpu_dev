@@ -1,0 +1,20 @@
+== memcheck ger 300 200 2
+Speedup (cuBLAS time / custom time): 0.332x
+========= LEAK SUMMARY: 0 bytes leaked in 0 allocations
+========= ERROR SUMMARY: 0 errors
+== memcheck gemm 7 50
+Speedup (cuBLAS time / custom time): 2.819x
+========= LEAK SUMMARY: 0 bytes leaked in 0 allocations
+========= ERROR SUMMARY: 0 errors
+== racecheck gemm 16 20
+TEST PASS
+Speedup (cuBLAS time / custom time): 3.665x
+========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+== synccheck gemm 32 10
+TEST PASS
+Speedup (cuBLAS time / custom time): 4.006x
+========= ERROR SUMMARY: 0 errors
+== racecheck gemm_opt 30
+
+ALL TESTS PASS (every kernel checked against the CPU reference, tol = 1e-06) | CSV: /content/akt26_gpu_dev/5-extras/results_Tesla_T4/sanitizer_tmp.csv
+========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
