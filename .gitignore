@@ -8,3 +8,4 @@
 5-extras/ger_sweep
 5-extras/multi_gpu_gemm
 *.o
+5-extras/team_compare
